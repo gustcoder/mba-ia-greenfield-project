@@ -1,17 +1,14 @@
 {
-  "moduleFileExtensions": [
-    "js",
-    "json",
-    "ts"
-  ],
+  "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.ts$": "ts-jest",
+    "^.+\\.js$": "<rootDir>/esm-to-cjs.transformer.js"
   },
-  "setupFiles": [
-    "dotenv/config",
-    "<rootDir>/../src/test/setup-test-env.ts"
+  "setupFiles": ["dotenv/config", "<rootDir>/../src/test/setup-test-env.ts"],
+  "transformIgnorePatterns": [
+    "/node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"
   ]
 }

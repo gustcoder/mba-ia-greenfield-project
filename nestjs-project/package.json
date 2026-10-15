@@ -18,7 +18,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:integration": "jest --runInBand --testRegex=\"\\.integration-spec\\.ts$\"",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:run": "npm run typeorm -- migration:run -d src/database/data-source.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/database/data-source.ts",
@@ -45,6 +45,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
     "handlebars": "^4.7.9",
+    "ioredis": "^5.11.1",
     "joi": "^18.1.2",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
@@ -85,7 +86,8 @@
     "rootDir": "src",
     "testRegex": ".*\\.(spec|integration-spec)\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest",
+      "^.+\\.js$": "<rootDir>/../test/esm-to-cjs.transformer.js"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"
@@ -95,6 +97,9 @@
     "setupFiles": [
       "dotenv/config",
       "<rootDir>/test/setup-test-env.ts"
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(@nestjs/bullmq|@nestjs/bull-shared)/)"
     ]
   }
 }

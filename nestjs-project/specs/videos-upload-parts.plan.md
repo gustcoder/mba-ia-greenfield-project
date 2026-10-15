@@ -105,3 +105,18 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
     - expect: status `404` e `body.error === "VIDEO_NOT_FOUND"`
   5. GET /videos/:videoId/upload/parts e POST .../part-urls sem header `Authorization`
     - expect: status `401` nos dois (Authorization Matrix)
+
+#### 1.7. part-urls-detecta-multipart-expirado
+
+**Covers AC:** #5
+**Source:** manual
+**Last sync:** 2026-10-15T00:47:15Z
+
+**Steps:**
+  1. `storageService.abortMultipartUpload(storage_key, upload_id)` direto no storage, com os valores da linha do vídeo, simulando a expiração
+  2. POST .../upload/part-urls como dono, com `{ part_numbers: [1] }`
+    - expect: status `410`
+    - expect: `body.error === "UPLOAD_EXPIRED"`
+    - expect: nenhuma URL assinada é devolvida
+  3. Recarregar a linha do vídeo
+    - expect: `status = 'failed'`, `failure_reason = 'UPLOAD_EXPIRED'`, `upload_id = null`
