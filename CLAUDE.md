@@ -20,11 +20,34 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
 - **Frontend** (Next.js) → calls API via REST, streams from Object Storage
 - **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
-- **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
+- **Video Worker** (FFmpeg) → separate process (`video-worker` Compose service) that consumes jobs from the queue, probes the video, generates the thumbnail, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (BullMQ on Redis) → `video-processing` job queue, fed by the API and consumed by the Video Worker
 - **Email Service** (SMTP) → account confirmation and password recovery
+
+## Video upload and processing
+
+Videos of up to 10GB go **straight from the browser to the object storage**; the API never carries the bytes (neither for upload nor for playback/download). Flow:
+
+1. `POST /videos` (initiate) — pre-registers the video as `draft` in the user's channel and opens an S3 multipart upload; returns the public video id (11 chars, the only id clients see) plus `part_size_bytes`/`part_count`.
+2. `POST /videos/:videoId/upload/part-urls` — signs presigned `PUT` urls for the parts the client asks for (`GET .../upload/parts` lists what the storage already has, to resume).
+3. The client `PUT`s each part directly to the storage and keeps each `ETag`.
+4. `POST /videos/:videoId/upload/complete` — closes the multipart, checks the assembled size against `VIDEO_MAX_SIZE_BYTES`, sets `processing` and enqueues the `process-video` job (`jobId` = the video's internal id, so repeating the call is idempotent).
+5. **Video Worker** consumes the `video-processing` queue: ffprobe → metadata, ffmpeg → JPEG thumbnail (`videos/{id}/thumbnail.jpg`), then `ready`. Invalid media → `failed`/`INVALID_MEDIA` without retry; transient errors retry with backoff and end `failed`/`PROCESSING_FAILED`.
+6. `GET /videos/:videoId` follows the status; `GET .../stream` and `.../download` (only `ready`) return presigned `GET` urls the storage serves itself (Range/206; download forces `Content-Disposition: attachment`).
+
+Interrupted uploads: an expired multipart makes the video `failed`/`UPLOAD_EXPIRED`; `POST .../upload/restart` reopens it on the same id, `DELETE /videos/:videoId` removes a `draft`/`failed` video and its objects.
+
+Where things live (all under `nestjs-project/src/`):
+
+- `videos/` — `VideosModule`: controller, `VideoUploadsService` (initiate/parts/complete/restart), `VideosService` (ownership lookup, detail, stream/download, delete), `Video` entity, DTOs, domain exceptions, and `processing/` (queue producer + the `VideoProcessingProcessor` consumer).
+- `storage/` — `StorageModule`/`StorageService`: the only code that talks to S3/MinIO (multipart, presign, head, delete).
+- `queue/` — `QueueModule`: BullMQ connection to Redis (prefix from `QUEUE_PREFIX`).
+- `media/` — `MediaModule`/`MediaService`: ffprobe/ffmpeg wrappers, independent of queue and database.
+- `worker/` + `worker.ts` — the worker process (`WorkerModule`, no HTTP); the processor is registered only here, never in the API.
+
+Setup, variables, MinIO caveats and how to run the worker: `nestjs-project/CLAUDE.md` → "Videos: storage, queue and worker". The HTTP contract is `nestjs-project/openapi.json` (regenerate with `npm run openapi:export`).
 
 ## Docker Networking
 

@@ -100,17 +100,23 @@ describe('VideoProcessingQueue (Redis)', () => {
   });
 
   it('should store its keys under the test prefix, never under the app prefix', async () => {
-    await producer.enqueue(randomUUID());
-
     const { host, port, prefix } = queueConfig();
     const redis = new Redis({ host, port });
+    const appKeys = async () =>
+      (await redis.keys(`bull:${VIDEO_PROCESSING_QUEUE}:*`)).sort();
     try {
+      // The dev video-worker (Compose) keeps its own keys under the app
+      // prefix in the same Redis, so "never" means: this run adds none.
+      const before = await appKeys();
+
+      await producer.enqueue(randomUUID());
+
       expect(prefix).toBe('bull-test');
       const testKeys = await redis.keys(
         `${prefix}:${VIDEO_PROCESSING_QUEUE}:*`,
       );
       expect(testKeys.length).toBeGreaterThan(0);
-      expect(await redis.keys(`bull:${VIDEO_PROCESSING_QUEUE}:*`)).toEqual([]);
+      expect(await appKeys()).toEqual(before);
     } finally {
       redis.disconnect();
     }

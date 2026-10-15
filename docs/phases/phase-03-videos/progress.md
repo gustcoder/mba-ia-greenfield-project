@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 12/13 completed
+**Status:** completed
+**SIs:** 13/13 completed
 
 ### SI-03.1 — Infra: dependências, imagem com FFmpeg e serviços Redis/MinIO no Compose
 - **Status:** completed
@@ -146,6 +146,15 @@
   - Pending for SI-03.13: `src/metadata.ts` and `openapi.json` still need regeneration for these three routes (and all of the previous video routes).
 
 ### SI-03.13 — Atualizar o contrato OpenAPI e a documentação de IA (seção de vídeos)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 30 passing in `src/openapi-export.integration-spec.ts` (21 new: the 9 video operations present and no extra `/videos` operation, bearer + summary on each of the 9, every ≥ 400 response of each of the 9 is `ApiErrorEnvelope` and includes 401, request/response schemas carry their properties, no internal field in the video schemas). `npm run openapi:export` run twice → byte-identical `openapi.json` (AC2). `tsc --noEmit` 0; eslint/prettier clean on the files touched; Jest exits by itself. Every file, Compose service, npm script and env var cited in the new `CLAUDE.md` sections was checked to exist (`.env.example` vars, `compose.yaml` services, `start:worker`, `start:worker:dev`, `openapi:export`, source folders)
+- **Observations:**
+  - **Gap found by inspecting the export:** `openapi:export` runs under `ts-node`, where the `@nestjs/swagger` CLI plugin is not applied, so request DTOs that rely only on `class-validator` + comments exported as empty schemas (`InitiateVideoUploadDto`, `SignUploadPartsDto`, `CompleteVideoUploadDto`, `RestartVideoUploadDto` had no properties; `CompleteUploadPartDto` was missing). Added explicit `@ApiProperty` / `@ApiPropertyOptional` to those four DTOs (+ `CompleteUploadPartDto`); the exported contract now lists their properties and required fields. The same limitation affects the Phase 02 auth DTOs (`RegisterDto`, `LoginDto`… export with empty `properties`): out of scope here, candidate for a follow-up task.
+  - **Corrects earlier notes:** SI-03.6/03.7/03.8/03.9/03.12 observations say `src/metadata.ts` must be regenerated in this SI. It is a deliberate 6-line stub (the `tsc` path of the plugin injects metadata into the compiled classes; the file only satisfies an import in `main.ts`), so there is nothing to regenerate; `openapi.json` was the only artifact to refresh.
+  - `openapi.json` gained ~1000 lines (9 operations + 12 schemas); it is committed content, to be included in the next commit.
+  - `nestjs-project/CLAUDE.md`: Redis/MinIO/worker readiness checks, the three new services (plus `mailpit`, which was missing), worker and export commands, a new "Videos: storage, queue and worker" section (variables, service-name hosts and the `127.0.0.1 minio` hosts-file mapping for browser access, test queue/bucket isolation, frozen `bitnamilegacy/minio` warning with CVE-2025-62506 / STS unused, MinIO × S3 differences: CORS exposing `ETag`, lifecycle rule for incomplete multipart, the shared-`dist/` watcher caveat).
+  - Root `CLAUDE.md`: queue is now "BullMQ on Redis" instead of "TBD", the worker is described as a separate Compose service, and a new "Video upload and processing" section documents the initiate → part-urls → direct `PUT` → complete → queue → worker → `ready` flow with the module map. Also changed the "TBD" label in `docs/diagrams/software-arch.mermaid` to "BullMQ + Redis" (the root `CLAUDE.md` points to that diagram as the source of the architecture, so leaving it at TBD would contradict the acceptance criterion in spirit; one-line change).
+  - **Final verification (2026-10-15):** full `npm test -- --runInBand` 446/447 passing (43/44 suites); the only failure is the inherited `migrations.integration-spec.ts` (`verification_tokens_type_enum already exists`), which also leaves Jest hanging on an open handle (exit via timeout) — same as the Phase 02 baseline. `test:e2e` 81/81 (8 suites). `tsc --noEmit` 0. `eslint` (without `--fix`) 150 errors + 40 warnings = exactly the Phase 02 baseline, none in files of this phase. `npm run build` OK (`dist/main.js` and `dist/worker.js`). Compose: db, mailpit, redis, minio, nestjs-api and video-worker up and healthy.
+  - **Found during final verification:** `video-processing.queue.integration-spec.ts` (SI-03.5) asserted that `bull:video-processing:*` is empty in the shared Redis, which is false as soon as the `video-worker` service (SI-03.11) runs: the worker keeps `meta`/`stalled-check`/`events` keys under the app prefix. The assertion now snapshots the app-prefix keys before enqueuing and requires them unchanged afterwards (the intent: this run adds nothing outside `bull-test`). Also removed the leftover job from my SI-03.11 smoke test from the dev Redis (it had made that test fail).
+  - **One-off deadlock seen once** in the migrations spec on the first full run (2 failures: `deadlock detected`) right after bringing the stack back up; not reproducible in two further runs (only the inherited `already exists` failure). Part of the same migrations-spec debt to fix in the end-of-phase bugfix branch.
+  - Note for `/implement` use: `npm run lint` is `eslint --fix`; the check above used plain `eslint` so no unrelated file was rewritten.

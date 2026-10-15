@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -12,6 +13,13 @@ export class SignUploadPartsDto {
    * Part numbers to sign (1-based, unique, up to 100 per call). Numbers above
    * the upload's part_count are rejected by the service.
    */
+  @ApiProperty({
+    type: [Number],
+    example: [1, 2],
+    minItems: 1,
+    maxItems: 100,
+    uniqueItems: true,
+  })
   @IsArray()
   @ArrayMinSize(1)
   @ArrayMaxSize(100)
