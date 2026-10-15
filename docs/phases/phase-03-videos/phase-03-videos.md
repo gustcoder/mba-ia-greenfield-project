@@ -173,7 +173,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 ### SI-03.6 — Endpoint POST /videos (pré-cadastro do rascunho e abertura do upload)
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-create.plan.md`
 **Authorization:** Authenticated (o vídeo é criado no canal do próprio usuário)
 
 **Description:** Inicia o upload direto ao storage: cria o vídeo como rascunho e o multipart upload na mesma operação, devolvendo o que o cliente precisa para enviar as partes.
@@ -211,7 +211,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 ### SI-03.7 — Endpoints de assinatura de partes e retomada do upload
 
 **Route:** POST /videos/:videoId/upload/part-urls, GET /videos/:videoId/upload/parts
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-parts.plan.md`
 **Authorization:** Owner
 
 **Description:** Entrega o envio das partes direto ao storage com URLs assinadas sob demanda e a retomada após queda de conexão, incluindo a detecção preguiçosa de upload expirado.
@@ -248,7 +248,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 ### SI-03.8 — Endpoint de conclusão do upload com enfileiramento do processamento
 
 **Route:** POST /videos/:videoId/upload/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-complete.plan.md`
 **Authorization:** Owner
 
 **Description:** Fecha o multipart, garante o limite de 10GB sobre o objeto realmente montado e dispara o processamento automático, de forma idempotente.
@@ -284,7 +284,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 ### SI-03.9 — Endpoints de reinício do upload expirado e exclusão do vídeo não processado
 
 **Route:** POST /videos/:videoId/upload/restart, DELETE /videos/:videoId
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-restart-delete.plan.md`
 **Authorization:** Owner
 
 **Description:** Completa o tratamento de uploads interrompidos: o dono pode reabrir um upload expirado no mesmo vídeo (mesma URL) ou excluir um vídeo que não chegou a ser processado.
@@ -384,7 +384,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 ### SI-03.12 — Endpoints de detalhe, streaming e download do vídeo
 
 **Route:** GET /videos/:videoId, GET /videos/:videoId/stream, GET /videos/:videoId/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-detail-stream-download.plan.md`
 **Authorization:** Owner
 
 **Description:** Expõe ao dono o estado do vídeo e as URLs pré-assinadas de reprodução (com range/206 servido pelo storage) e de download, sem que bytes passem pela API.
