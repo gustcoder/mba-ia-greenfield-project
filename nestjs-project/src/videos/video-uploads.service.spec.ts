@@ -737,3 +737,181 @@ describe('VideoUploadsService.complete', () => {
     });
   });
 });
+
+describe('VideoUploadsService.restart', () => {
+  const PUBLIC_ID = 'dQw4w9WgXcQ';
+  const MAX = 1000;
+  const PART = 400;
+  const repository = { update: jest.fn(), findOneByOrFail: jest.fn() };
+  const videos = { findOwnedByPublicId: jest.fn() };
+  const storage = {
+    createMultipartUpload: jest.fn(),
+    abortMultipartUpload: jest.fn(),
+  };
+  const mapper = { toVideoResponse: jest.fn() };
+  let service: VideoUploadsService;
+
+  const expired = (overrides: Partial<Video> = {}): Video =>
+    ({
+      id: 'video-uuid',
+      public_id: PUBLIC_ID,
+      status: VideoStatus.FAILED,
+      failure_reason: 'UPLOAD_EXPIRED',
+      mime_type: 'video/mp4',
+      size_bytes: '900',
+      storage_key: 'videos/video-uuid/original',
+      upload_id: null,
+      ...overrides,
+    }) as Video;
+
+  beforeEach(async () => {
+    jest.restoreAllMocks();
+    repository.update.mockReset().mockResolvedValue({ affected: 1 });
+    repository.findOneByOrFail
+      .mockReset()
+      .mockResolvedValue(expired({ status: VideoStatus.DRAFT }));
+    videos.findOwnedByPublicId.mockReset().mockResolvedValue(expired());
+    storage.createMultipartUpload.mockReset().mockResolvedValue('upload-2');
+    storage.abortMultipartUpload.mockReset().mockResolvedValue(undefined);
+    mapper.toVideoResponse
+      .mockReset()
+      .mockImplementation((v: Video) =>
+        Promise.resolve({ id: v.public_id, status: v.status }),
+      );
+
+    const module = await Test.createTestingModule({
+      providers: [
+        VideoUploadsService,
+        { provide: getRepositoryToken(Video), useValue: repository },
+        { provide: ChannelsService, useValue: {} },
+        { provide: VideosService, useValue: videos },
+        { provide: StorageService, useValue: storage },
+        { provide: VideoResponseMapper, useValue: mapper },
+        { provide: VideoProcessingQueue, useValue: {} },
+        {
+          provide: videosConfig.KEY,
+          useValue: { maxSizeBytes: MAX, uploadPartSizeBytes: PART },
+        },
+      ],
+    }).compile();
+    service = module.get(VideoUploadsService);
+  });
+
+  it('should reopen a multipart upload on the same key and put the video back in draft', async () => {
+    const result = await service.restart(USER_ID, PUBLIC_ID, {
+      size_bytes: 900,
+    });
+
+    expect(storage.createMultipartUpload).toHaveBeenCalledWith(
+      'videos/video-uuid/original',
+      'video/mp4',
+    );
+    expect(repository.update).toHaveBeenCalledWith(
+      {
+        id: 'video-uuid',
+        status: VideoStatus.FAILED,
+        failure_reason: 'UPLOAD_EXPIRED',
+      },
+      {
+        status: VideoStatus.DRAFT,
+        failure_reason: null,
+        upload_id: 'upload-2',
+        size_bytes: '900',
+        part_size_bytes: PART,
+        part_count: 3,
+      },
+    );
+    expect(result).toEqual({
+      video: { id: PUBLIC_ID, status: VideoStatus.DRAFT },
+      upload: { part_size_bytes: PART, part_count: 3 },
+    });
+  });
+
+  it('should recompute part_count from the new size_bytes', async () => {
+    const result = await service.restart(USER_ID, PUBLIC_ID, {
+      size_bytes: 400,
+    });
+
+    expect(result.upload).toEqual({ part_size_bytes: PART, part_count: 1 });
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ size_bytes: '400', part_count: 1 }),
+    );
+  });
+
+  it('should keep the declared size when none is sent', async () => {
+    const result = await service.restart(USER_ID, PUBLIC_ID, {});
+
+    expect(result.upload.part_count).toBe(3);
+    expect(repository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ size_bytes: '900' }),
+    );
+  });
+
+  it.each([
+    ['failed for another reason', VideoStatus.FAILED, 'INVALID_MEDIA'],
+    ['draft', VideoStatus.DRAFT, null],
+    ['processing', VideoStatus.PROCESSING, null],
+    ['ready', VideoStatus.READY, null],
+  ])(
+    'should refuse a video that is %s, opening nothing',
+    async (_label, status, failureReason) => {
+      videos.findOwnedByPublicId.mockResolvedValue(
+        expired({ status, failure_reason: failureReason }),
+      );
+
+      await expect(
+        service.restart(USER_ID, PUBLIC_ID, {}),
+      ).rejects.toBeInstanceOf(InvalidUploadStateException);
+
+      expect(storage.createMultipartUpload).not.toHaveBeenCalled();
+      expect(repository.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should reject a size above the limit but accept exactly the limit', async () => {
+    await expect(
+      service.restart(USER_ID, PUBLIC_ID, { size_bytes: MAX + 1 }),
+    ).rejects.toBeInstanceOf(VideoTooLargeException);
+    expect(storage.createMultipartUpload).not.toHaveBeenCalled();
+
+    await expect(
+      service.restart(USER_ID, PUBLIC_ID, { size_bytes: MAX }),
+    ).resolves.toBeDefined();
+  });
+
+  it('should abort the new multipart upload and rethrow when saving fails', async () => {
+    repository.update.mockRejectedValue(new Error('db down'));
+
+    await expect(service.restart(USER_ID, PUBLIC_ID, {})).rejects.toThrow(
+      'db down',
+    );
+
+    expect(storage.abortMultipartUpload).toHaveBeenCalledWith(
+      'videos/video-uuid/original',
+      'upload-2',
+    );
+  });
+
+  it('should abort the new multipart upload and refuse when a concurrent call already changed the video', async () => {
+    repository.update.mockResolvedValue({ affected: 0 });
+
+    await expect(
+      service.restart(USER_ID, PUBLIC_ID, {}),
+    ).rejects.toBeInstanceOf(InvalidUploadStateException);
+
+    expect(storage.abortMultipartUpload).toHaveBeenCalledWith(
+      'videos/video-uuid/original',
+      'upload-2',
+    );
+  });
+
+  it('should let VideoNotFoundException from the ownership check through', async () => {
+    videos.findOwnedByPublicId.mockRejectedValue(new VideoNotFoundException());
+
+    await expect(
+      service.restart(USER_ID, PUBLIC_ID, {}),
+    ).rejects.toBeInstanceOf(VideoNotFoundException);
+  });
+});

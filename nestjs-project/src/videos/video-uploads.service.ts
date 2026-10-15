@@ -8,6 +8,7 @@ import videosConfig from '../config/videos.config';
 import { StorageService } from '../storage/storage.service';
 import type { CompleteVideoUploadDto } from './dto/complete-video-upload.dto';
 import type { InitiateVideoUploadDto } from './dto/initiate-video-upload.dto';
+import type { RestartVideoUploadDto } from './dto/restart-video-upload.dto';
 import type { SignUploadPartsDto } from './dto/sign-upload-parts.dto';
 import type { SignedUploadPartsResponseDto } from './dto/signed-upload-parts-response.dto';
 import type { UploadedPartsResponseDto } from './dto/uploaded-parts-response.dto';
@@ -88,8 +89,7 @@ export class VideoUploadsService {
 
     const id = randomUUID();
     const storageKey = originalKey(id);
-    const partSizeBytes = this.config.uploadPartSizeBytes;
-    const partCount = Math.ceil(dto.size_bytes / partSizeBytes);
+    const { partSizeBytes, partCount } = this.uploadGeometry(dto.size_bytes);
 
     const uploadId = await this.storage.createMultipartUpload(
       storageKey,
@@ -115,6 +115,68 @@ export class VideoUploadsService {
 
     return {
       video: await this.responseMapper.toVideoResponse(video),
+      upload: { part_size_bytes: partSizeBytes, part_count: partCount },
+    };
+  }
+
+  // Reopens an expired upload on the same video (same public id, same
+  // storage key): only a video that failed as UPLOAD_EXPIRED qualifies.
+  async restart(
+    userId: string,
+    publicId: string,
+    dto: RestartVideoUploadDto,
+  ): Promise<VideoUploadResponseDto> {
+    const video = await this.videosService.findOwnedByPublicId(
+      userId,
+      publicId,
+    );
+    if (
+      video.status !== VideoStatus.FAILED ||
+      video.failure_reason !== VideoFailureReason.UPLOAD_EXPIRED
+    ) {
+      throw new InvalidUploadStateException();
+    }
+    const sizeBytes = dto.size_bytes ?? Number(video.size_bytes);
+    if (sizeBytes > this.config.maxSizeBytes) {
+      throw new VideoTooLargeException();
+    }
+
+    const { partSizeBytes, partCount } = this.uploadGeometry(sizeBytes);
+    const uploadId = await this.storage.createMultipartUpload(
+      video.storage_key,
+      video.mime_type,
+    );
+
+    try {
+      // Conditional on the state read above: a concurrent restart must not
+      // leave two open multipart uploads, only one of them recorded.
+      const result = await this.videoRepository.update(
+        {
+          id: video.id,
+          status: VideoStatus.FAILED,
+          failure_reason: VideoFailureReason.UPLOAD_EXPIRED,
+        },
+        {
+          status: VideoStatus.DRAFT,
+          failure_reason: null,
+          upload_id: uploadId,
+          size_bytes: String(sizeBytes),
+          part_size_bytes: partSizeBytes,
+          part_count: partCount,
+        },
+      );
+      if (!result.affected) {
+        throw new InvalidUploadStateException();
+      }
+    } catch (error) {
+      await this.abortOrphanedUpload(video.storage_key, uploadId);
+      throw error;
+    }
+
+    return {
+      video: await this.responseMapper.toVideoResponse(
+        await this.videoRepository.findOneByOrFail({ id: video.id }),
+      ),
       upload: { part_size_bytes: partSizeBytes, part_count: partCount },
     };
   }
@@ -262,6 +324,14 @@ export class VideoUploadsService {
       }
       throw error;
     }
+  }
+
+  private uploadGeometry(sizeBytes: number): {
+    partSizeBytes: number;
+    partCount: number;
+  } {
+    const partSizeBytes = this.config.uploadPartSizeBytes;
+    return { partSizeBytes, partCount: Math.ceil(sizeBytes / partSizeBytes) };
   }
 
   private async findDraftWithOpenUpload(

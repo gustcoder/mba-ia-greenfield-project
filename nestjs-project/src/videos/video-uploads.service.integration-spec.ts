@@ -462,4 +462,65 @@ describe('VideoUploadsService.initiate (Postgres + MinIO)', () => {
       ).rejects.toBeInstanceOf(VideoNotFoundException);
     });
   });
+
+  describe('restart', () => {
+    it('should reopen an expired upload on the same video with a multipart upload that accepts parts', async () => {
+      const channel = await createUserWithChannel();
+      const { video } = await service.initiate(channel.user_id, body);
+      const first = await videoRepository.findOneByOrFail({
+        public_id: video.id,
+      });
+      await storage.abortMultipartUpload(
+        first.storage_key,
+        first.upload_id as string,
+      );
+      await expect(
+        service.listUploadedParts(channel.user_id, video.id),
+      ).rejects.toBeInstanceOf(UploadExpiredException);
+
+      const restarted = await service.restart(channel.user_id, video.id, {
+        size_bytes: 209715200,
+      });
+
+      expect(restarted.video).toMatchObject({
+        id: video.id,
+        status: 'draft',
+        failure_reason: null,
+        size_bytes: 209715200,
+      });
+      expect(restarted.upload).toEqual({
+        part_size_bytes: 104857600,
+        part_count: 2,
+      });
+      const row = await videoRepository.findOneByOrFail({ id: first.id });
+      expect(row.upload_id).toEqual(expect.any(String));
+      expect(row.upload_id).not.toBe(first.upload_id);
+      expect(row.storage_key).toBe(first.storage_key);
+      const signed = await service.signParts(channel.user_id, video.id, {
+        part_numbers: [1],
+      });
+      const put = await fetch(signed.parts[0].url, {
+        method: 'PUT',
+        body: new Uint8Array(1024).fill(1),
+      });
+      expect(put.status).toBe(200);
+      const listed = await service.listUploadedParts(channel.user_id, video.id);
+      expect(listed.uploaded_parts.map((p) => p.part_number)).toEqual([1]);
+    });
+
+    it('should refuse a draft video and leave its open upload alone', async () => {
+      const channel = await createUserWithChannel();
+      const { video } = await service.initiate(channel.user_id, body);
+      const before = await videoRepository.findOneByOrFail({
+        public_id: video.id,
+      });
+
+      await expect(
+        service.restart(channel.user_id, video.id, {}),
+      ).rejects.toBeInstanceOf(InvalidUploadStateException);
+
+      const after = await videoRepository.findOneByOrFail({ id: before.id });
+      expect(after.upload_id).toBe(before.upload_id);
+    });
+  });
 });

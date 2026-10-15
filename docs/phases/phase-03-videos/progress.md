@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/13 completed
+**SIs:** 12/13 completed
 
 ### SI-03.1 — Infra: dependências, imagem com FFmpeg e serviços Redis/MinIO no Compose
 - **Status:** completed
@@ -95,24 +95,55 @@
   - Pending for SI-03.13: `src/metadata.ts` and `openapi.json` still need regeneration for this route.
 
 ### SI-03.9 — Endpoints de reinício do upload expirado e exclusão do vídeo não processado
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new/affected passing: 5 e2e (`test/videos-upload-restart-delete.e2e-spec.ts`: the 5 scenarios of `specs/videos-upload-restart-delete.plan.md`, all 5 ACs), 72 unit in `video-uploads.service.spec.ts` + `videos.service.spec.ts` (10 new for `restart`, 6 new for `deleteOwned`), 29 integration in the three videos integration/module suites (2 new for `restart`, 4 new for `deleteOwned`, real Postgres + MinIO). Regression: full e2e 76/76 (7 suites); `tsc --noEmit` 0; eslint clean on every file touched; Jest exits by itself (no `--forceExit`)
+- **Observations:**
+  - `restart` applies its state change with `UPDATE … WHERE id AND status = 'failed' AND failure_reason = 'UPLOAD_EXPIRED'` and checks `affected`: of two concurrent restarts only one wins; the loser aborts the multipart upload it just opened and answers `INVALID_UPLOAD_STATE`, so no orphaned multipart is left. Same compensation (abort + rethrow) if the update itself fails.
+  - `restart` also rewrites `part_size_bytes` (current config value) together with `size_bytes`/`part_count`, so the stored geometry always matches the new multipart upload; with no `size_bytes` in the body the declared size is kept. Check order: ownership (404) → state (409) → size (400 `VIDEO_TOO_LARGE`).
+  - Shared `uploadGeometry(sizeBytes)` helper in `VideoUploadsService` now feeds both `initiate` and `restart` (part count math in one place).
+  - `VideosService` gained a `StorageService` dependency for `deleteOwned` (`VideosModule` already imports `StorageModule`); the `VideosService` unit spec and integration spec were updated to provide it (the latter imports `StorageModule` + `storageConfig`).
+  - `deleteOwned` order: abort multipart (only if `upload_id`; `StorageUploadNotFoundError` ignored, any other error aborts the delete and keeps the row) → `deletePrefix('videos/{id}/')` → delete row. A failure after the abort leaves the row so the call can be retried.
+  - The `restart` integration tests live in `video-uploads.service.integration-spec.ts` (the service that owns `restart`, with its Postgres + MinIO + Redis setup) instead of `videos.service.integration-spec.ts` as the plan's table lists; `deleteOwned` is in the latter, as planned.
+  - Out of scope (pre-existing): `prettier --check src` flags `src/mail/templates/*.hbs` (Phase 02 files).
+  - Pending for SI-03.13: `src/metadata.ts` and `openapi.json` still need regeneration for these two routes.
 
 ### SI-03.10 — Implementar o serviço de mídia (ffprobe e thumbnail via FFmpeg)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 42 passing in `src/media`: 27 unit (`media.service.spec.ts`: ffprobe JSON mapping, metadata summary, container allowlist, audio-only/cover-art rejection, transient-vs-permanent errors, 10% seek maths, frame-0 fallback), 1 module compilation, 14 integration (`media.service.integration-spec.ts`: real ffmpeg/ffprobe 5.1.9 + real MinIO — 3 s 640x360 h264 fixture, presigned internal URL read with no temp file created, JPEG signature + width ≤ 1280 + aspect ratio, timeout kill, exit code/stderr capture, URL-query redaction). `tsc --noEmit` 0; eslint/prettier clean on every file touched; Jest exits by itself; no ffmpeg/ffprobe/sleep process left behind
+- **Observations:**
+  - **Found by the first test run — plain text is a "video" for ffprobe:** the `tty` demuxer reads any text file as ANSI frames (`codec_name: ansi`, 640x400), so `probe` resolved and `extractThumbnail` produced a JPEG for a `.txt`. Added a container allowlist beyond the plan (`ALLOWED_CONTAINER_FORMATS = mov | matroska | webm`, matching the four allowed MIME types): `probe` throws `InvalidMediaError` for any other `format_name` (tty, image2, gif, missing). Without it a non-video upload with a `video/mp4` MIME would end `ready`.
+  - Error model: `FfmpegExecutionError` (reason `exit-code` | `timeout` | `spawn` | `output-limit`, with stderr/exit code) vs `InvalidMediaError`. `probe` maps to `InvalidMediaError` only when ffprobe reports "Invalid data found when processing input", the container is not allowed, there is no (non-cover-art) video stream, no readable duration, or the JSON is unreadable. Network errors, timeouts and a missing binary pass through as `FfmpegExecutionError` so SI-03.11 can treat them as transient (retry) — an unreachable object is not "invalid media".
+  - `extractThumbnail` retries at `-ss 0` on any `FfmpegExecutionError` or a result that is not a JPEG (no `FF D8`); no retry when the first attempt was already at 0. It does not validate that the input is a video (the worker probes first).
+  - `FfmpegRunner` is an injectable class (not a free function) so `MediaService` unit tests mock it; it spawns without a shell, kills with SIGKILL on timeout (60 s probe / 120 s thumbnail, constants in `media.constants.ts`) and caps stdout at 50 MiB and stderr at 16 KiB. Query strings of any URL in stderr are redacted (`?<redacted>`) in both `message` and `stderr`: presigned URLs carry the signature and ffmpeg prints the URL on errors, which would otherwise reach logs and, in SI-03.11, a failure record.
+  - `metadata` is a whitelisted summary (format: name/long name/duration/size/bit_rate; streams: index, codec, dimensions, pix_fmt, frame rates, duration, bit rate, channels, sample rate/layout); ffprobe's free-form `tags` (title, location, encoder…) are deliberately dropped.
+  - A video whose container reports no duration (e.g. a browser-recorded webm) is rejected as `InvalidMediaError` because `duration_seconds` drives the thumbnail instant; revisit if that turns out to matter.
+  - `probe` passes the input after `-i` (not as a bare positional argument as in the plan's command line) so a path can never be read as an option.
+  - The first test run was delegated to the test subagent as the skill prescribes; the re-run after the allowlist fix (media suites only) was run directly.
+  - `MediaModule` is not imported by any module yet; the worker module (SI-03.11) does that.
 
 ### SI-03.11 — Implementar o worker de vídeo (entrypoint, processor e serviço no Compose)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 22 passing: 14 unit (`video-processing.processor.spec.ts`), 1 module compilation (`worker.module.spec.ts`), 7 integration (`video-processing.processor.integration-spec.ts`, real Postgres + MinIO + ffmpeg + Redis, including the real BullMQ worker: enqueue → `ready`; non-video → `failed`/`INVALID_MEDIA` after one `probe` call; missing object → retried with backoff, `probe` called exactly 2 times, then `failed`/`PROCESSING_FAILED`; first attempt fails, retry succeeds → `ready`). Regression: full e2e 76/76; `tsc --noEmit` 0; eslint/prettier clean on every file touched; Jest exits by itself. Manual acceptance against the real Compose stack: `video-worker` up with no published port, and a real `initiate → sign → PUT → complete` run (through the services of the compiled app, default `bull` prefix) took a video from `processing` to `ready` by itself in the dev worker (3 s, 640x360, h264, thumbnail key set); the smoke data (user, channel, video row, objects, tmp file) was removed afterwards. `docker compose stop video-worker` returns in ~1 s (graceful shutdown)
+- **Observations:**
+  - The retry tests run the real BullMQ worker and confirm the plan's attempt rule (`attemptsMade + 1 >= opts.attempts`) is correct for BullMQ 6: with `attempts = 2` the processor ran exactly twice and only the second run wrote `PROCESSING_FAILED`.
+  - `WorkerModule` registers `TypeOrmModule.forFeature([Video, Channel, User])` (the plan lists only `Video`): `Video → Channel → User` are related entities and TypeORM refuses to build the metadata without all three, even though the worker never touches channels or users. It also reuses `envValidationSchema` (same `.env` as the API), so the worker fails fast on a bad config like the API does.
+  - The processor is a provider of `WorkerModule` only; `VideoProcessingQueueModule` (shared with the API) registers the queue as a producer and never the consumer, so the API process does not consume jobs.
+  - The final `UPDATE` is guarded by `status = 'processing'` (also the two failure writes): a video that changed meanwhile is never overwritten. `size_bytes` is rewritten from ffprobe only when it reports a positive size; the value confirmed by `HeadObject` in `complete` stays otherwise. The thumbnail is stored before the row flips to `ready`, so a `ready` video always has its thumbnail; a crash in between only costs a retry (same key, overwrite is safe).
+  - `start:worker:dev` is `nest start --watch --entryFile worker`. It shares `dist/` (and its `deleteOutDir`) with a `nest start --watch` of the API on the same bind mount: running both watchers at once may delete each other's output. Not hit so far (the API container only runs `tail`); if it shows up, give the worker its own outDir or run it from a compiled build (`start:worker`).
+  - `video-worker` in `compose.yaml` mirrors `nestjs-api` (same build, bind mount, `depends_on` db/redis/minio healthy) with no `ports`; it is left running after this SI.
+  - Two typing workarounds: `metadata` is cast to `QueryDeepPartialEntity<Video>['metadata']` in the update (TypeORM's deep-partial type cannot express an arbitrary jsonb object); tests use `jest.spyOn(...).mockImplementationOnce` (call-through afterwards) instead of rebinding the original method.
+  - Noise in the test output is expected: the failure-path tests make the processor log `ERROR` lines (with the presigned URL's query already redacted by the runner) and the pg driver prints its `client.query()` deprecation warning.
 
 ### SI-03.12 — Endpoints de detalhe, streaming e download do vídeo
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** new in this SI: 5 e2e (`test/videos-detail-stream-download.e2e-spec.ts`: the 5 scenarios of `specs/videos-detail-stream-download.plan.md`, all 5 ACs; real `Range` → 206 with 1024 bytes and `Content-Range: bytes 0-1023/4096`, real `Content-Disposition: attachment; filename="Minha Aula.mp4"` from MinIO), 16 unit in `videos.service.spec.ts` (detail for every status, TTL + `expires_at`, `VIDEO_NOT_READY` for draft/processing/failed, attachment name only on download), 9 integration in `videos.service.integration-spec.ts` against real Postgres + MinIO. Regression: full e2e 81/81 (8 suites); `tsc --noEmit` 0; eslint/prettier clean on every file touched by this phase (only the inherited `Function` error in `create-test-data-source.ts` remains); Jest exits by itself
+- **Observations:**
+  - The first run of the integration spec failed on my own over-strict assertion (`JSON.stringify(detail)` must not contain the internal uuid): the uuid is part of the storage key (`videos/{uuid}/…`), so it appears inside the presigned `thumbnail_url` — and inside the stream/download urls — **by design** (single bucket, one prefix per video; TD-09). The public id is what the API exposes as a field; the urls are opaque signed strings. The test now asserts the uuid is absent everywhere except `thumbnail_url`. If hiding the uuid even from urls is ever wanted, the key layout would have to use the public id (a change in SI-03.3/03.4 territory).
+  - `VideosService` now depends on `VideoResponseMapper` and `videosConfig` (for `getOwned` and the playback TTL); the mapper only needs `StorageService` + config, so there is no cycle with `VideoUploadsService`. The existing `VideosService` specs got the two providers; the integration spec loads `videosConfig`.
+  - `expires_at` is computed as `now + playbackUrlTtlSeconds` right after signing (same convention as `part-urls`), not read back from the URL.
+  - Stream and download share one private `sign()`; the stream url carries no `Content-Disposition` (asserted), so a player does not trigger a download.
+  - `GET /videos/:videoId` works for every status (the owner follows `draft → processing → ready/failed`); only stream/download require `ready`. Ownership check first (404), then readiness (409), uniform with the other endpoints.
+  - Pending for SI-03.13: `src/metadata.ts` and `openapi.json` still need regeneration for these three routes (and all of the previous video routes).
 
 ### SI-03.13 — Atualizar o contrato OpenAPI e a documentação de IA (seção de vídeos)
 - **Status:** pending
