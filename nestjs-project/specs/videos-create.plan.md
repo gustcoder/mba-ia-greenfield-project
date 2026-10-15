@@ -22,7 +22,7 @@ target_file: test/videos-create.e2e-spec.ts
 
 **Covers AC:** #1, #2, #7
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos com `Authorization: Bearer <access_token>` e body `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 314572800 }`
@@ -43,7 +43,7 @@ target_file: test/videos-create.e2e-spec.ts
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos autenticado com `{ filename: "foto.png", mime_type: "image/png", size_bytes: 1024 }`
@@ -56,7 +56,7 @@ target_file: test/videos-create.e2e-spec.ts
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos autenticado com `{ filename: "grande.mp4", mime_type: "video/mp4", size_bytes: 10737418241 }`
@@ -69,7 +69,7 @@ target_file: test/videos-create.e2e-spec.ts
 
 **Covers AC:** #5
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos autenticado com `{ mime_type: "video/mp4", size_bytes: 1024 }` (sem `filename`)
@@ -82,7 +82,7 @@ target_file: test/videos-create.e2e-spec.ts
 
 **Covers AC:** #6
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos sem header `Authorization`, com body válido `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 1024 }`

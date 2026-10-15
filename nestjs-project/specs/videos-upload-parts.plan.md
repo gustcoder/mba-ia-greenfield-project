@@ -16,13 +16,13 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
 
 ### 1. Assinatura de partes e retomada do upload
 
-**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video` e o `StorageService`. `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')` no bucket de teste; criar o usuário dono e um segundo usuário (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 314572800 }` (`part_count = 3`) e guardar `body.video.id` como `videoId`. Os `PUT` nas URLs assinadas saem do container de testes, então o host de `S3_PUBLIC_ENDPOINT` precisa ser alcançável dali (ver a nota de ambiente no SI-03.2: em teste, `http://minio:9000`). `afterAll`: `app.close()`.
+**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video` e o `StorageService`. `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')` no bucket de teste; criar o usuário dono e um segundo usuário (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 314572800 }` (`part_count = 3`) e guardar `body.video.id` como `videoId`. Os `PUT` nas URLs assinadas saem do container de testes, que alcança o storage pelo host assinado (`S3_PUBLIC_ENDPOINT=http://minio:9000`, nome do serviço do Compose, per `phase-03-videos/TD-09` revision 2026-10-14). `afterAll`: `app.close()`.
 
 #### 1.1. assina-urls-e-storage-aceita-put
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos/:videoId/upload/part-urls como dono, com `{ part_numbers: [1, 2] }`
@@ -37,7 +37,7 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
 
 **Covers AC:** #2
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Assinar a parte 1 (`part-urls` com `{ part_numbers: [1] }`) e enviar 1024 bytes por `PUT` na URL, guardando o `ETag`
@@ -51,7 +51,7 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST .../upload/part-urls como dono, com `{ part_numbers: [4] }` (acima de `part_count = 3`)
@@ -59,13 +59,13 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
     - expect: `body.error === "INVALID_PART_NUMBER"`
   2. POST .../upload/part-urls como dono, com `{ part_numbers: [0] }`
     - expect: status `400`
-    - expect: `body.error === "INVALID_PART_NUMBER"` (o AC #3 exige o código de domínio também para `0`; o DTO não pode barrar `0` antes com `VALIDATION_ERROR`)
+    - expect: `body.error === "VALIDATION_ERROR"` (o DTO barra inteiros < 1; só o teto `part_count` é erro de domínio, per `phase-03-videos/TD-06` revision 2026-10-14)
 
 #### 1.4. video-fora-de-draft-retorna-409
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Atualizar a linha do vídeo para `status = 'processing'` direto no repositório
@@ -77,7 +77,7 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
 
 **Covers AC:** #5
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Ler `storage_key` e `upload_id` da linha e chamar `storageService.abortMultipartUpload(storage_key, upload_id)` direto no storage, simulando a expiração
@@ -91,7 +91,7 @@ Os dois endpoints mantêm o envio das partes fora da API. O `part-urls` assina, 
 
 **Covers AC:** #6
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. GET /videos/:videoId/upload/parts com o token do segundo usuário (não dono)

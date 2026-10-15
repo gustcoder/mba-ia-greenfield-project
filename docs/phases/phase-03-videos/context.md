@@ -130,6 +130,9 @@ _Source files:_
 **Recommendation:** It is the variant that actually delivers the plan's "retomar em caso de falha" for multi-hour uploads and keeps presigned URLs short-lived; a configurable part size around 100MiB keeps a 10GB file near 100 parts.
 **Libraries:** —
 
+**Revisions:**
+- 2026-10-14 — Part-number validation split: `part_numbers` items that are not integers ≥ 1 are rejected by DTO validation as `400 VALIDATION_ERROR` (consistent with the rest of the API); numbers above the video's `part_count` are the domain error `400 INVALID_PART_NUMBER`, since only the service knows `part_count`. Rationale: resolves the contradiction between SI-03.7 acceptance criterion #3 and the Validation Rules found by /plan-test-specs — user choice.
+
 ### phase-03-videos/TD-07
 
 **Recommendation:** It keeps the flow inside the API's existing auth/validation/error contract, is fully exercisable by supertest e2e against real MinIO/Redis, and the idempotent retry removes the need for an outbox or bucket notifications.
@@ -147,6 +150,9 @@ _Source files:_
 
 **Recommendation:** It keeps one access-control path that Phase 04 visibility rules can extend without leaks. Consequence for the contract: two endpoint settings — an internal endpoint (Compose service name) used for server-side calls, and a public endpoint used only to sign client-facing URLs — plus bucket CORS allowing `PUT`/`GET` from the frontend origin and exposing `ETag` (needed by TD-05 A).
 **Libraries:** —
+
+**Revisions:**
+- 2026-10-14 — In dev and tests the public endpoint is also the Compose service name: `S3_PUBLIC_ENDPOINT=http://minio:9000` (phase spec / CLAUDE.md rule: always the service name, never `localhost`). The two S3 clients stay separate because in production the public endpoint is a different domain. No Phase 03 consumer runs outside a container; to open a presigned URL from the host browser in dev, map `127.0.0.1 minio` in the hosts file (the signature stays valid because the signed host is unchanged). Rationale: compliance with the phase spec's Docker constraint — user choice.
 
 ### phase-03-videos/TD-10
 
@@ -186,6 +192,10 @@ _Source files:_
 
 **Recommendation:** It is the only option that exercises the S3 presigned/multipart/range contract the phase depends on, and it extends the pattern the suite already uses for Postgres and Mailpit; updating the testing guide's storage section should be tracked as a separate docs task.
 **Libraries:** —
+
+**Revisions:**
+- 2026-10-14 — Integration/e2e suites fetch presigned URLs (part `PUT`, Range `GET`, download) from inside the `nestjs-api` container. This works without any test-only endpoint override because the public endpoint is the service name `http://minio:9000` (TD-09 revision 2026-10-14); rewriting the URL host after signing is not an option, since the host is part of the SigV4 signature. Rationale: gap found by /plan-test-specs — user choice.
+- 2026-10-14 — E2E suites may override a config namespace provider (e.g., `videos` with a tiny `maxSizeBytes`, via `overrideProvider(videosConfig.KEY)`) to reach limits that are infeasible to reproduce for real (a 10GB object for `FILE_TOO_LARGE`); services, repositories, storage and queue stay real — no mocking. Rationale: gap found by /plan-test-specs — user choice.
 
 ## Inherited Decisions Detail
 

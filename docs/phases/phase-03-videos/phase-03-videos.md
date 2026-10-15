@@ -3,9 +3,9 @@ kind: phase
 name: phase-03-videos
 test_specs_aware: true
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-10-14T19:05:27-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-10-14T21:47:05-03:00"
   docs/phases/phase-03-videos/library-refs.md: "2026-10-14T19:05:06-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-14T19:04:00-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-14T21:47:05-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-14T12:31:15-03:00"
 ---
 
@@ -28,7 +28,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 1. Instalar no `nestjs-project/` as libs fixadas no `library-refs.md`: `@nestjs/bullmq@^12.0.0`, `bullmq@^6.3.15`, `@aws-sdk/client-s3@^3.1152.0`, `@aws-sdk/s3-request-presigner@^3.1152.0` (per `phase-03-videos/TD-01`, `phase-03-videos/TD-05`)
 2. Adicionar `ffmpeg` (pacote Debian, traz `ffprobe`) ao `Dockerfile.dev`, imagem compartilhada pela API, pelo worker e pela suíte de testes (per `phase-03-videos/TD-02`, `phase-03-videos/TD-03`)
 3. Adicionar o serviço `redis` ao `compose.yaml`: imagem `redis` com tag fixa da linha 8, `--maxmemory-policy noeviction` (requisito do BullMQ, ver `library-refs.md → bullmq`), healthcheck `redis-cli ping`, porta publicada só em `127.0.0.1` (per `phase-03-videos/TD-01`)
-4. Adicionar o serviço `minio` ao `compose.yaml`: `bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20` (tag + digest), `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` vindos do `.env`, `MINIO_DEFAULT_BUCKETS=streamtube-videos,streamtube-videos-test` (bucket da app + bucket de testes), volume nomeado em `/bitnami/minio/data`, portas `9000`/`9001` publicadas só em `127.0.0.1`, healthcheck `curl -f http://localhost:9000/minio/health/live` (per `phase-03-videos/TD-10` revision 2026-10-14, `phase-03-videos/TD-15`)
+4. Adicionar o serviço `minio` ao `compose.yaml`: `bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20` (tag + digest), `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` vindos do `.env`, `MINIO_DEFAULT_BUCKETS=streamtube-videos,streamtube-videos-test` (bucket da app + bucket de testes), volume nomeado em `/bitnami/minio/data`, portas `9000`/`9001` publicadas só em `127.0.0.1`, healthcheck `curl -f http://minio:9000/minio/health/live` (per `phase-03-videos/TD-10` revision 2026-10-14, `phase-03-videos/TD-15`, `phase-03-videos/TD-09` revision 2026-10-14)
 5. Fazer `nestjs-api` depender de `redis` e `minio` com `condition: service_healthy`; adicionar `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` ao `.env.example`
 
 **Tests:** _(empty — Infra)_
@@ -41,7 +41,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 - `docker compose exec nestjs-api ffprobe -version` e `docker compose exec nestjs-api ffmpeg -version` executam com sucesso
 - `docker compose exec redis redis-cli CONFIG GET maxmemory-policy` retorna `noeviction`
 - Os buckets `streamtube-videos` e `streamtube-videos-test` existem no MinIO logo após o primeiro boot do container
-- `curl http://localhost:9000/minio/health/live` responde `200` a partir do host; a porta não está publicada em outras interfaces
+- `docker compose exec nestjs-api curl -f http://minio:9000/minio/health/live` responde `200` (container para container, pelo nome do serviço); `docker compose port minio 9000` mostra a porta publicada só em `127.0.0.1`
 
 ---
 
@@ -51,7 +51,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 
 **Technical actions:**
 
-1. Criar `src/config/storage.config.ts` (`registerAs('storage')`): `endpoint` (`S3_ENDPOINT`, interno, ex. `http://minio:9000`), `publicEndpoint` (`S3_PUBLIC_ENDPOINT`, ex. `http://localhost:9000`), `region` (`S3_REGION`), `accessKeyId` (`S3_ACCESS_KEY`), `secretAccessKey` (`S3_SECRET_KEY`), `bucket` (`S3_BUCKET`), `forcePathStyle` (`S3_FORCE_PATH_STYLE`) (per `phase-03-videos/TD-09`, `phase-01-configuracao-base/TD-03`)
+1. Criar `src/config/storage.config.ts` (`registerAs('storage')`): `endpoint` (`S3_ENDPOINT`, interno, ex. `http://minio:9000`), `publicEndpoint` (`S3_PUBLIC_ENDPOINT`, em dev/teste `http://minio:9000`; em produção, o domínio público do S3) (per `phase-03-videos/TD-09` revision 2026-10-14), `region` (`S3_REGION`), `accessKeyId` (`S3_ACCESS_KEY`), `secretAccessKey` (`S3_SECRET_KEY`), `bucket` (`S3_BUCKET`), `forcePathStyle` (`S3_FORCE_PATH_STYLE`) (per `phase-03-videos/TD-09`, `phase-01-configuracao-base/TD-03`)
 2. Criar `src/config/queue.config.ts` (`registerAs('queue')`): `host` (`REDIS_HOST=redis`), `port` (`REDIS_PORT`), `prefix` (`QUEUE_PREFIX`, default `bull`) (per `phase-03-videos/TD-01`)
 3. Criar `src/config/videos.config.ts` (`registerAs('videos')`): `maxSizeBytes` (`VIDEO_MAX_SIZE_BYTES`, default `10737418240`), `uploadPartSizeBytes` (`VIDEO_UPLOAD_PART_SIZE_BYTES`, default `104857600`), `uploadUrlTtlSeconds` (`VIDEO_UPLOAD_URL_TTL_SECONDS`), `playbackUrlTtlSeconds` (`VIDEO_PLAYBACK_URL_TTL_SECONDS`), `sourceUrlTtlSeconds` (`VIDEO_SOURCE_URL_TTL_SECONDS`, URL interna do worker), `processingAttempts` (`VIDEO_PROCESSING_ATTEMPTS`, default `3`), `processingBackoffMs` (`VIDEO_PROCESSING_BACKOFF_MS`, default `10000`) (per `phase-03-videos/TD-06`, `phase-03-videos/TD-11`, `phase-03-videos/TD-14`)
 4. Adicionar todas as chaves ao schema Joi de `src/config/env.validation.ts` (part size ≥ 5MiB, TTLs ≤ 604800 s, limite de tamanho ≥ part size) e ao `.env.example` com hosts = nomes de serviço do Compose (per `phase-01-configuracao-base/TD-02`)
@@ -71,6 +71,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 - Remover `S3_ENDPOINT` (ou `REDIS_HOST`) do ambiente faz o bootstrap falhar com mensagem de validação citando a chave
 - `VIDEO_UPLOAD_PART_SIZE_BYTES` menor que 5242880 faz o bootstrap falhar na validação
 - Durante a execução das suítes Jest, o bucket efetivo é `streamtube-videos-test` e o prefixo de fila é `bull-test`
+- Nenhum valor do `.env.example` usa `localhost` como host; `S3_ENDPOINT` e `S3_PUBLIC_ENDPOINT` apontam para `http://minio:9000`
 
 ---
 
@@ -92,6 +93,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 |----------|-------|-----------|
 | `StorageService` | Integration (MinIO real, bucket de teste): multipart completo via `PUT` nas URLs pré-assinadas com `fetch`, `listParts` após envio parcial, `NoSuchUpload` → `StorageUploadNotFoundError`, `InvalidPart` → `StorageInvalidPartsError`, `deletePrefix` | `src/storage/storage.service.integration-spec.ts` |
 | `StorageService` (presign GET) | Integration: URL pública responde `206` a `Range: bytes=0-99`; com `attachmentFilename` responde `Content-Disposition: attachment` | `src/storage/storage.service.integration-spec.ts` |
+| `StorageService` (escolha do cliente) | Unit (sem rede; config com `endpoint` e `publicEndpoint` distintos): `presignUploadPart` / `presignGet` usam o host público; `presignInternalGet` usa o interno | `src/storage/storage.service.spec.ts` |
 | `StorageModule` | Unit: compilation test com config de teste | `src/storage/storage.module.spec.ts` |
 
 **Dependencies:** SI-03.2 — consome o namespace `storage`
@@ -103,7 +105,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 - A URL de download pré-assinada devolve `Content-Disposition: attachment; filename="<nome>"`
 - Operar sobre um `uploadId` abortado produz `StorageUploadNotFoundError`, não um erro genérico do SDK
 - `deletePrefix('videos/{id}/')` remove todos os objetos daquele prefixo e nenhum outro
-- As URLs devolvidas por `presignUploadPart` / `presignGet` usam o host de `S3_PUBLIC_ENDPOINT`; as de `presignInternalGet` usam o de `S3_ENDPOINT`
+- As URLs devolvidas por `presignUploadPart` / `presignGet` usam o host de `S3_PUBLIC_ENDPOINT`; as de `presignInternalGet` usam o de `S3_ENDPOINT` (verificado com endpoints distintos na config, já que em dev/teste os dois são `http://minio:9000`)
 
 ---
 
@@ -222,14 +224,14 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 2. Criar em `src/videos/videos.service.ts` o `findOwnedByPublicId(userId, publicId)`: formato inválido, inexistente ou de outro canal → `VideoNotFoundException` (mesma resposta nos três casos) (per `phase-03-videos/TD-12`, `### Authorization Matrix`)
 3. Em `VideoUploadsService`: `signParts(userId, publicId, partNumbers)` (exige `draft`, valida `1..part_count`, assina com `uploadUrlTtlSeconds`, devolve `expires_at`) e `listUploadedParts(userId, publicId)` (exige `draft`, mapeia `listParts`) (per `phase-03-videos/TD-06`)
 4. Tratar `StorageUploadNotFoundError` nessas operações: grava `status = 'failed'`, `failure_reason = 'UPLOAD_EXPIRED'`, `upload_id = null` e lança `UploadExpiredException` (per `phase-03-videos/TD-13` revision 2026-10-14)
-5. Adicionar ao `VideosController` `POST /videos/:videoId/upload/part-urls` (`@HttpCode(200)`, DTO `SignUploadPartsDto` com `part_numbers` 1..100 únicos) e `GET /videos/:videoId/upload/parts`, com decorators OpenAPI para `200`/`400`/`401`/`404`/`409`/`410`
+5. Adicionar ao `VideosController` `POST /videos/:videoId/upload/part-urls` (`@HttpCode(200)`, DTO `SignUploadPartsDto` com `part_numbers` 1..100 inteiros ≥ 1 únicos; o teto `part_count` é checado no serviço) (per `phase-03-videos/TD-06` revision 2026-10-14) e `GET /videos/:videoId/upload/parts`, com decorators OpenAPI para `200`/`400`/`401`/`404`/`409`/`410`
 
 **Tests:**
 
 | Artifact | Layer | Test file |
 |----------|-------|-----------|
 | `VideosService.findOwnedByPublicId` | Integration (Postgres real): dono encontra; outro usuário, id inexistente e id mal formado → `VIDEO_NOT_FOUND` | `src/videos/videos.service.integration-spec.ts` |
-| `VideoUploadsService.signParts` / `listUploadedParts` | Unit: estado ≠ `draft` → `INVALID_UPLOAD_STATE`; parte fora do intervalo → `INVALID_PART_NUMBER`; `StorageUploadNotFoundError` → vídeo `failed`/`UPLOAD_EXPIRED` + `UploadExpiredException` | `src/videos/video-uploads.service.spec.ts` |
+| `VideoUploadsService.signParts` / `listUploadedParts` | Unit: estado ≠ `draft` → `INVALID_UPLOAD_STATE`; parte acima de `part_count` → `INVALID_PART_NUMBER`; `StorageUploadNotFoundError` → vídeo `failed`/`UPLOAD_EXPIRED` + `UploadExpiredException` | `src/videos/video-uploads.service.spec.ts` |
 | `VideoUploadsService.signParts` / `listUploadedParts` | Integration (Postgres + MinIO reais): `PUT` numa URL assinada é aceito pelo storage e a parte aparece em `listUploadedParts`; multipart abortado por fora → vídeo vira `failed` | `src/videos/video-uploads.service.integration-spec.ts` |
 
 **Dependencies:** SI-03.6 — vídeo `draft` com multipart aberto e `VideosController`
@@ -238,7 +240,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 
 - `POST /videos/:videoId/upload/part-urls` do dono com `{ part_numbers: [1, 2] }` retorna `200` com duas URLs `PUT` e `expires_at`; um `PUT` de bytes numa dessas URLs é aceito pelo storage e devolve `ETag`
 - `GET /videos/:videoId/upload/parts` após enviar a parte 1 retorna `200` com `uploaded_parts` contendo `part_number: 1` e o `etag` correspondente
-- `POST .../part-urls` com `part_numbers: [0]` ou acima de `part_count` retorna `400` com `error: "INVALID_PART_NUMBER"`
+- `POST .../part-urls` com número acima de `part_count` retorna `400` com `error: "INVALID_PART_NUMBER"`; com `part_numbers: [0]` retorna `400` com `error: "VALIDATION_ERROR"`
 - `POST .../part-urls` para um vídeo que não está em `draft` retorna `409` com `error: "INVALID_UPLOAD_STATE"`
 - Com o multipart expirado/abortado no storage, `GET .../parts` retorna `410` com `error: "UPLOAD_EXPIRED"` e o vídeo passa a `status = 'failed'`, `failure_reason = 'UPLOAD_EXPIRED'`
 - `GET .../parts` de um vídeo de outro usuário, de um id inexistente ou de um id mal formado retorna `404` com `error: "VIDEO_NOT_FOUND"` em todos os casos
@@ -267,6 +269,8 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 |----------|-------|-----------|
 | `VideoUploadsService.complete` | Unit: ramos `draft` → `processing` + enqueue; `processing` → reenfileira sem regravar; `ready` → sem enqueue; `failed` → `INVALID_UPLOAD_STATE`; objeto acima do limite → `failed`/`FILE_TOO_LARGE`; partes inválidas → `INVALID_UPLOAD_PARTS` | `src/videos/video-uploads.service.spec.ts` |
 | `VideoUploadsService.complete` | Integration (Postgres + MinIO + Redis reais): upload real de 2 partes → objeto montado, vídeo `processing`, job `process-video` na fila com `jobId = videos.id`; segunda chamada não duplica o job | `src/videos/video-uploads.service.integration-spec.ts` |
+
+O e2e do critério de `FILE_TOO_LARGE` usa `overrideProvider(videosConfig.KEY)` com `maxSizeBytes` pequeno numa segunda instância da app; serviços, storage e fila continuam reais (per `phase-03-videos/TD-15` revision 2026-10-14).
 
 **Dependencies:** SI-03.7 — partes enviadas e `findOwnedByPublicId`; SI-03.5 — `VideoProcessingQueue`
 
@@ -423,7 +427,7 @@ Entregar upload de vídeos de até 10GB sem impacto na performance da API (uploa
 
 1. Rodar `npm run openapi:export` e commitar o `nestjs-project/openapi.json` regenerado com os endpoints `/videos` e seus schemas de erro (per `openapi-docs-nestjs/TD-02`)
 2. Estender `src/openapi-export.integration-spec.ts` para afirmar que os paths `/videos`, `/videos/{videoId}`, `/videos/{videoId}/upload/part-urls`, `/videos/{videoId}/upload/parts`, `/videos/{videoId}/upload/complete`, `/videos/{videoId}/upload/restart`, `/videos/{videoId}/stream` e `/videos/{videoId}/download` constam do documento com `bearer` e respostas de erro referenciando `ApiErrorEnvelope`
-3. Atualizar `nestjs-project/CLAUDE.md`: serviços novos (`redis`, `minio`, `video-worker`) com verificação de prontidão, comando do worker, buckets (app e teste) e variáveis novas; aviso de que a imagem `bitnamilegacy/minio` é congelada e só para dev/testes (CVE-2025-62506 não corrigida; o caminho STS não é usado); diferenças MinIO × S3 de produção (CORS por bucket expondo `ETag` e regra de lifecycle para multipart incompleto) (per `phase-03-videos/TD-10` revision, `library-refs.md → minio`)
+3. Atualizar `nestjs-project/CLAUDE.md`: serviços novos (`redis`, `minio`, `video-worker`) com verificação de prontidão, comando do worker, buckets (app e teste) e variáveis novas; aviso de que a imagem `bitnamilegacy/minio` é congelada e só para dev/testes (CVE-2025-62506 não corrigida; o caminho STS não é usado); diferenças MinIO × S3 de produção (CORS por bucket expondo `ETag` e regra de lifecycle para multipart incompleto); como abrir URLs assinadas pelo browser do host em dev (mapear `127.0.0.1 minio` no arquivo hosts) (per `phase-03-videos/TD-10` revision, `phase-03-videos/TD-09` revision 2026-10-14, `library-refs.md → minio`)
 4. Atualizar o `CLAUDE.md` da raiz: seção de vídeos descrevendo o fluxo (initiate → part-urls → PUT direto no storage → complete → fila `video-processing` → worker → `ready`), a fila definida (BullMQ + Redis) no lugar do "TBD" e onde ficam módulo, worker e storage
 
 **Tests:**
@@ -548,7 +552,7 @@ Assina, sob demanda, as URLs de `UploadPart` para os números de parte pedidos (
 **Error responses:**
 - 404 VIDEO_NOT_FOUND: vídeo inexistente ou de outro canal
 - 409 INVALID_UPLOAD_STATE: `status` diferente de `draft`
-- 400 INVALID_PART_NUMBER: algum número fora de `1..part_count`
+- 400 INVALID_PART_NUMBER: algum número acima de `part_count` (per `phase-03-videos/TD-06` revision 2026-10-14)
 - 410 UPLOAD_EXPIRED: o storage respondeu `NoSuchUpload`; o vídeo passa a `failed` com `failure_reason = 'UPLOAD_EXPIRED'` (per `phase-03-videos/TD-13` revision 2026-10-14)
 - 400 VALIDATION_ERROR: corpo inválido
 
@@ -670,7 +674,7 @@ Igual ao `stream`, mas a URL assinada inclui `ResponseContentDisposition: attach
 - `mime_type`: required, um de `video/mp4`, `video/quicktime`, `video/webm`, `video/x-matroska` (falha → domínio `UNSUPPORTED_MEDIA_TYPE`, não `VALIDATION_ERROR`, para o cliente distinguir)
 - `size_bytes`: required, inteiro ≥ 1; acima de `VIDEO_MAX_SIZE_BYTES` → domínio `VIDEO_TOO_LARGE`
 - `title`: optional, string, 1..100
-- `part_numbers`: required, array 1..100 de inteiros ≥ 1, sem repetição
+- `part_numbers`: required, array 1..100 de inteiros ≥ 1, sem repetição (falha → `VALIDATION_ERROR`; acima de `part_count` → domínio `INVALID_PART_NUMBER`, checado no serviço)
 - `parts`: required, array ≥ 1 de `{ part_number: integer ≥ 1, etag: string não vazia }`, sem `part_number` repetido
 - `:videoId`: string de 11 chars no alfabeto base64url (`[A-Za-z0-9_-]{11}`); formato inválido → `404 VIDEO_NOT_FOUND` (não vaza diferença entre "mal formado" e "inexistente")
 
@@ -702,7 +706,7 @@ Não-dono recebe `404 VIDEO_NOT_FOUND` (não `403`), para não confirmar que o `
 | UNSUPPORTED_MEDIA_TYPE | 400 | Unsupported video type | `POST /videos` com `mime_type` fora da allowlist (per `phase-03-videos/TD-05` revision) |
 | VIDEO_TOO_LARGE | 400 | Video exceeds the maximum allowed size | `POST /videos` / `restart` com `size_bytes` > `VIDEO_MAX_SIZE_BYTES`; ou `complete` quando o objeto montado excede o limite (per `phase-03-videos/TD-07`) |
 | INVALID_UPLOAD_STATE | 409 | Operation not allowed in the current video status | Operação de upload fora do `status` permitido (part-urls/parts/complete fora de `draft`; restart fora de `failed`+`UPLOAD_EXPIRED`; delete em `processing`/`ready`) (per `phase-03-videos/TD-13`) |
-| INVALID_PART_NUMBER | 400 | Part number out of range | `part-urls` com número fora de `1..part_count` (per `phase-03-videos/TD-06`) |
+| INVALID_PART_NUMBER | 400 | Part number out of range | `part-urls` com número acima de `part_count` (per `phase-03-videos/TD-06`, `phase-03-videos/TD-06` revision 2026-10-14) |
 | INVALID_UPLOAD_PARTS | 400 | Uploaded parts are invalid or incomplete | `complete` quando o storage rejeita a lista de partes (`InvalidPart`, `InvalidPartOrder`, `EntityTooSmall`) |
 | UPLOAD_EXPIRED | 410 | Upload session expired | Operação de upload recebe `NoSuchUpload` do storage; o vídeo vira `failed` (`UPLOAD_EXPIRED`) (per `phase-03-videos/TD-13` revision 2026-10-14) |
 | VIDEO_NOT_READY | 409 | Video is not ready | `stream` / `download` com `status` ≠ `ready` (per `phase-03-videos/TD-11`, `phase-03-videos/TD-12`) |

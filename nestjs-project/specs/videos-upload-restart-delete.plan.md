@@ -16,13 +16,13 @@ Os dois endpoints cuidam do upload interrompido. O `restart` reabre o upload de 
 
 ### 1. Reinício do upload expirado e exclusão do vídeo não processado
 
-**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video` e o `StorageService`. `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')`; criar o usuário dono e um segundo usuário (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 314572800 }` e guardar `videoId`. Helper `expireUpload(videoId)`: `abortMultipartUpload` direto no storage seguido de `GET .../upload/parts` (espera `410`), deixando o vídeo `failed` / `UPLOAD_EXPIRED` pelo caminho real da API. Os `PUT` em URLs assinadas exigem o host de `S3_PUBLIC_ENDPOINT` alcançável do container de testes. `afterAll`: `app.close()`.
+**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video` e o `StorageService`. `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')`; criar o usuário dono e um segundo usuário (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 314572800 }` e guardar `videoId`. Helper `expireUpload(videoId)`: `abortMultipartUpload` direto no storage seguido de `GET .../upload/parts` (espera `410`), deixando o vídeo `failed` / `UPLOAD_EXPIRED` pelo caminho real da API. Os `PUT` em URLs assinadas saem do container de testes (`S3_PUBLIC_ENDPOINT=http://minio:9000`, nome do serviço do Compose, per `phase-03-videos/TD-09` revision 2026-10-14). `afterAll`: `app.close()`.
 
 #### 1.1. restart-reabre-upload-expirado-na-mesma-url
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. `expireUpload(videoId)` e guardar o `upload_id` antigo
@@ -42,7 +42,7 @@ Os dois endpoints cuidam do upload interrompido. O `restart` reabre o upload de 
 
 **Covers AC:** #2
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Com o vídeo em `draft` (estado do setup), POST .../upload/restart como dono com `{}`
@@ -55,7 +55,7 @@ Os dois endpoints cuidam do upload interrompido. O `restart` reabre o upload de 
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Assinar a parte 1 e enviar 1024 bytes por `PUT`; guardar `storage_key`, `upload_id` e o uuid da linha
@@ -72,7 +72,7 @@ Os dois endpoints cuidam do upload interrompido. O `restart` reabre o upload de 
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Gravar um objeto em `videos/{id}/original` com `storageService.putObject` e atualizar a linha para `status = 'ready'`
@@ -87,7 +87,7 @@ Os dois endpoints cuidam do upload interrompido. O `restart` reabre o upload de 
 
 **Covers AC:** #5
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. `expireUpload(videoId)` e POST /videos/:videoId/upload/restart com o token do segundo usuário

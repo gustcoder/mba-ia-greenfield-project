@@ -16,13 +16,13 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 ### 1. Conclusão do upload com enfileiramento do processamento
 
-**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video`, o `StorageService` e a `Queue` de `video-processing` (`app.get(getQueueToken('video-processing'))`, prefixo `bull-test` via `src/test/setup-test-env.ts`; nenhum worker consome a fila nesta suíte). `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')` + `queue.obliterate({ force: true })`; criar o usuário dono (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 1024 }` (`part_count = 1`), assinar a parte 1 via `part-urls`, enviar `Buffer.alloc(1024, 1)` por `PUT` na URL (host de `S3_PUBLIC_ENDPOINT` alcançável do container de testes) e guardar `videoId` e o `ETag`. `afterAll`: `app.close()` (fecha as conexões Redis da fila).
+**Setup:** `beforeAll`: `Test.createTestingModule({ imports: [AppModule] }).compile()`, com `ValidationPipe` global e `DomainExceptionFilter` + `ValidationExceptionFilter` (mesmo bootstrap de `test/auth.e2e-spec.ts`); obter `DataSource`, o repositório de `Video`, o `StorageService` e a `Queue` de `video-processing` (`app.get(getQueueToken('video-processing'))`, prefixo `bull-test` via `src/test/setup-test-env.ts`; nenhum worker consome a fila nesta suíte). `beforeEach`: `cleanAllTables(dataSource)` + `storageService.deletePrefix('videos/')` + `queue.obliterate({ force: true })`; criar o usuário dono (helper `registerConfirmAndLogin`); como dono, `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 1024 }` (`part_count = 1`), assinar a parte 1 via `part-urls`, enviar `Buffer.alloc(1024, 1)` por `PUT` na URL (`S3_PUBLIC_ENDPOINT=http://minio:9000`, nome do serviço do Compose, per `phase-03-videos/TD-09` revision 2026-10-14) e guardar `videoId` e o `ETag`. `afterAll`: `app.close()` (fecha as conexões Redis da fila).
 
 #### 1.1. conclui-upload-e-enfileira-job
 
 **Covers AC:** #1
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST /videos/:videoId/upload/complete como dono, com `{ parts: [{ part_number: 1, etag: <ETag> }] }`
@@ -39,7 +39,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Covers AC:** #2
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST .../upload/complete como dono com as partes corretas
@@ -53,7 +53,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Covers AC:** #3
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. POST .../upload/complete como dono, com `{ parts: [{ part_number: 1, etag: "\"00000000000000000000000000000000\"" }] }`
@@ -68,10 +68,10 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Covers AC:** #4
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
-  1. Subir uma segunda instância da aplicação (mesmo bootstrap) com `.overrideProvider(videosConfig.KEY).useValue({ ...valoresPadrão, maxSizeBytes: 512 })`. Montar 10GB reais é inviável no teste, e só a config muda: nenhum serviço é mockado
+  1. Subir uma segunda instância da aplicação (mesmo bootstrap) com `.overrideProvider(videosConfig.KEY).useValue({ ...valoresPadrão, maxSizeBytes: 512 })`. Montar 10GB reais é inviável no teste, e só a config muda: nenhum serviço é mockado (per `phase-03-videos/TD-15` revision 2026-10-14)
   2. Nessa instância, como dono: `POST /videos` com `{ filename: "aula.mp4", mime_type: "video/mp4", size_bytes: 512 }`, assinar a parte 1 e enviar `Buffer.alloc(1024, 1)` por `PUT` (o objeto montado fica maior que o declarado e que o limite)
   3. POST .../upload/complete com a parte e o `ETag` corretos
     - expect: status `400`
@@ -86,7 +86,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Covers AC:** #5
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. Atualizar a linha para `status = 'failed'` e `failure_reason = 'INVALID_MEDIA'` direto no repositório
@@ -99,7 +99,7 @@ target_file: test/videos-upload-complete.e2e-spec.ts
 
 **Covers AC:** #6
 **Source:** auto
-**Last sync:** 2026-10-14T22:42:38Z
+**Last sync:** 2026-10-15T00:47:15Z
 
 **Steps:**
   1. `storageService.abortMultipartUpload(storage_key, upload_id)` direto no storage, com os valores da linha

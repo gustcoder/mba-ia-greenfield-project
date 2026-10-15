@@ -216,6 +216,10 @@ _Subprojects in scope:_
 
 **Decision:** B (Server-fixed part size + on-demand signing + `ListParts` resume)
 
+**Revisions:**
+
+- 2026-10-14 — Part-number validation split: `part_numbers` items that are not integers ≥ 1 are rejected by DTO validation as `400 VALIDATION_ERROR` (consistent with the rest of the API); numbers above the video's `part_count` are the domain error `400 INVALID_PART_NUMBER`, since only the service knows `part_count`. Rationale: resolves the contradiction between SI-03.7 acceptance criterion #3 and the Validation Rules found by /plan-test-specs — user choice.
+
 ---
 
 ## TD-07: Draft Pre-registration & Upload-Completion Trigger
@@ -314,6 +318,10 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (single private bucket, per-video prefixes, presigned access)** — it keeps one access-control path that Phase 04 visibility rules can extend without leaks. Consequence for the contract: two endpoint settings — an internal endpoint (Compose service name) used for server-side calls, and a public endpoint used only to sign client-facing URLs — plus bucket CORS allowing `PUT`/`GET` from the frontend origin and exposing `ETag` (needed by TD-05 A).
 
 **Decision:** A (Single private bucket, per-video prefixes, presigned access; internal + public endpoints)
+
+**Revisions:**
+
+- 2026-10-14 — In dev and tests the public endpoint is also the Compose service name: `S3_PUBLIC_ENDPOINT=http://minio:9000` (phase spec / CLAUDE.md rule: always the service name, never `localhost`). The two S3 clients stay separate because in production the public endpoint is a different domain. No Phase 03 consumer runs outside a container; to open a presigned URL from the host browser in dev, map `127.0.0.1 minio` in the hosts file (the signature stays valid because the signed host is unchanged). Rationale: compliance with the phase spec's Docker constraint — user choice.
 
 ---
 
@@ -504,6 +512,11 @@ _Subprojects in scope:_
 
 **Decision:** A (Real MinIO + Redis from Compose, test-scoped bucket/queue)
 
+**Revisions:**
+
+- 2026-10-14 — Integration/e2e suites fetch presigned URLs (part `PUT`, Range `GET`, download) from inside the `nestjs-api` container. This works without any test-only endpoint override because the public endpoint is the service name `http://minio:9000` (TD-09 revision 2026-10-14); rewriting the URL host after signing is not an option, since the host is part of the SigV4 signature. Rationale: gap found by /plan-test-specs — user choice.
+- 2026-10-14 — E2E suites may override a config namespace provider (e.g., `videos` with a tiny `maxSizeBytes`, via `overrideProvider(videosConfig.KEY)`) to reach limits that are infeasible to reproduce for real (a 10GB object for `FILE_TOO_LARGE`); services, repositories, storage and queue stay real — no mocking. Rationale: gap found by /plan-test-specs — user choice.
+
 ---
 
 ## Canonical env-key set (informative — consequence of TD-01, TD-09, TD-10, TD-15)
@@ -514,7 +527,7 @@ Not a decision; listed so `plan-context`/`plan-build` keep Joi schema, `.env.exa
 |---|---|---|
 | Queue (TD-01 A) | `REDIS_HOST=redis`, `REDIS_PORT` | Compose service name as host |
 | Storage server-side (TD-09) | `S3_ENDPOINT=http://<storage-service>:9000`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE=true` | Internal Compose endpoint |
-| Storage client-facing (TD-09) | `S3_PUBLIC_ENDPOINT=http://localhost:9000` | Only for signing URLs handed to browsers |
+| Storage client-facing (TD-09) | `S3_PUBLIC_ENDPOINT=http://minio:9000` (dev/test; production = public S3 domain) | Only for signing client-facing URLs; service name per TD-09 revision 2026-10-14 |
 | Upload/delivery policy (TD-06, TD-11) | part size, presigned URL TTLs, max upload size (10GB) | Values fixed in the plan |
 
 ---
