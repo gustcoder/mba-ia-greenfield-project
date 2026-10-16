@@ -16,6 +16,10 @@ libs:
     version: "^3.1152.0"
     context7_id: "/aws/aws-sdk-js-v3"
     fetched_at: "2026-10-14T19:05:00-03:00"
+  "ioredis":
+    version: "^5.11.1"
+    context7_id: "/redis/ioredis"
+    fetched_at: "2026-10-15T00:00:00-03:00"
   "minio":
     version: "bitnamilegacy/minio:2025.7.23-debian-12-r5"
     context7_id: "/minio/docs"
@@ -72,6 +76,16 @@ _Used by: phase-03-videos/TD-04 (worker FFmpeg input), TD-05/TD-06 (part URLs), 
 - **Download disposition:** `new GetObjectCommand({ Bucket, Key, ResponseContentDisposition: 'attachment; filename="…"' })`. Response-override parameters only work on signed requests, so a presigned URL is the right tool (TD-11).
 - **Payload / headers:** presigned requests use `UNSIGNED-PAYLOAD`, and `content-type` is unsigned by default (opt in with `signableHeaders`). The presigned URL cannot enforce `Content-Length`, so size limits are enforced server-side via part arithmetic (TD-06) and `HeadObject` (TD-07).
 - **Worker input (TD-04):** the worker signs a `GetObjectCommand` against the **internal** endpoint, since FFmpeg runs inside the Compose network. Its TTL must exceed the job's worst-case duration.
+
+### ioredis
+
+_Used by: phase-03-videos/TD-01 (Redis client behind BullMQ), TD-15 (queue-prefix isolation test)._
+
+- **Version:** installed `5.11.1` (`^5.11.1`), the same copy `bullmq@6.3.15` resolves (`npm ls ioredis` shows it deduped). `npm view ioredis version` already reports `6.0.0`, but BullMQ 6 is built against the 5.x line: stay on `^5` until BullMQ declares support for 6.
+- **Role in the code:** BullMQ opens its own connections from `queue.config` (`host`/`port`), so the application never instantiates `ioredis`. The only direct use is `src/videos/processing/video-processing.queue.integration-spec.ts`, which opens a `new Redis({ host, port })` to list keys (`redis.keys('<prefix>:video-processing:*')`) and prove the test run stays under `QUEUE_PREFIX=bull-test`. It is a direct dependency so that import does not rely on a transitive package.
+- **Constructor:** `new Redis({ host, port })` connects immediately (`lazyConnect: false` by default). `maxRetriesPerRequest` defaults to `20`; BullMQ workers need `null` there, and BullMQ applies that to the connections it creates itself.
+- **Closing:** `disconnect()` closes the socket immediately and may drop pending replies; `quit()` waits for them. For a one-shot read in a test, `disconnect()` in `finally` is enough and keeps the open handle from holding Jest alive.
+- **Compose:** the host is the Compose service name (`REDIS_HOST=redis`), never `localhost`.
 
 ### minio
 
