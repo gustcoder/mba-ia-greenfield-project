@@ -39,13 +39,22 @@ describe('Database migrations (integration)', () => {
       ),
       dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
     ]);
+    // Dropping the tables leaves their enum types behind (synchronize in other
+    // suites creates them too), and the migration's CREATE TYPE would fail.
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "public"."verification_tokens_type_enum"`,
+    );
   });
 
   afterAll(async () => {
     // The second test undoes the last migration, leaving token tables missing.
     // Re-apply so the shared DB is fully migrated when subsequent suites run.
-    await dataSource.runMigrations();
-    await dataSource.destroy();
+    try {
+      await dataSource.runMigrations();
+    } finally {
+      // Always release the connection, or the open handle keeps Jest alive.
+      await dataSource.destroy();
+    }
   });
 
   it('should apply all migrations and create all four tables', async () => {
