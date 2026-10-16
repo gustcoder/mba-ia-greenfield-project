@@ -13,8 +13,11 @@ docker compose ps   # all services must show status "running"
 Then verify each infrastructure service is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `docker compose exec minio curl -f http://minio:9000/minio/health/live` — expect exit code 0 (the host is the Compose service name, never `localhost`)
+- **Video worker:** `docker compose logs video-worker` — expect `Video worker started`; the worker has no port, so there is nothing to `curl`
 
-Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
+Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment". The `video-worker` service is part of the infrastructure (it starts with `docker compose up -d`): it only consumes the `video-processing` queue and exposes no HTTP port.
 
 ## Development Environment
 
@@ -34,6 +37,10 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `mailpit` — SMTP sink for account e-mails, SMTP `1025`, web UI `8025`
+- `redis` — Redis 8 (`maxmemory-policy noeviction`, required by BullMQ), bound to `127.0.0.1:6379`
+- `minio` — S3-compatible object storage, API `127.0.0.1:9000`, console `127.0.0.1:9001`; buckets `streamtube-videos` (app) and `streamtube-videos-test` (test suites, set by `src/test/setup-test-env.ts`) are created at startup
+- `video-worker` — same image and bind mount as `nestjs-api`, runs `npm run start:worker:dev`; consumes the `video-processing` queue (ffprobe/ffmpeg are installed in the shared image); no published ports
 
 All verification and teardown commands run on the **host machine**:
 
@@ -62,6 +69,9 @@ docker compose down
 npm run start:dev                        # Dev server with hot-reload
 npm run build                            # Compile to dist/
 npm run start:prod                       # Run compiled build
+npm run start:worker:dev                 # Video worker with watch (what the video-worker service runs)
+npm run start:worker                     # Video worker from the compiled build (node dist/worker)
+npm run openapi:export                   # Regenerate openapi.json (re-run after changing any controller/DTO)
 
 npm test                                 # Unit tests
 npm run test:watch                       # Unit tests in watch mode
@@ -123,6 +133,20 @@ These settings are required in `package.json` (jest config) and `test/jest-e2e.j
 - `testRegex: '.*\\.(spec|integration-spec)\\.ts$'` — covers both unit (`*.spec.ts`) and integration (`*.integration-spec.ts`) suffixes.
 
 Do not add new test-file suffixes; if a new test type is needed, update the regex deliberately.
+
+## Videos: storage, queue and worker
+
+Flow, module and file map are in the root `CLAUDE.md` ("Video upload and processing"). Operational notes for this subproject:
+
+- **Variables** (all in `.env.example`, validated at boot by `src/config/env.validation.ts`): `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` (MinIO root account, also used by the app as `S3_ACCESS_KEY`/`S3_SECRET_KEY`), `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_FORCE_PATH_STYLE`, `REDIS_HOST`, `REDIS_PORT`, `QUEUE_PREFIX`, `VIDEO_MAX_SIZE_BYTES`, `VIDEO_UPLOAD_PART_SIZE_BYTES`, `VIDEO_UPLOAD_URL_TTL_SECONDS`, `VIDEO_PLAYBACK_URL_TTL_SECONDS`, `VIDEO_SOURCE_URL_TTL_SECONDS`, `VIDEO_PROCESSING_ATTEMPTS`, `VIDEO_PROCESSING_BACKOFF_MS`.
+- **Hosts are service names**, including `S3_PUBLIC_ENDPOINT=http://minio:9000` (the host baked into presigned URLs). To open a presigned URL from the host browser in dev, map the service name in the hosts file: `127.0.0.1 minio` (`/etc/hosts`, or `C:\Windows\System32\drivers\etc\hosts` on Windows). Tests do not need it: they run inside the Compose network.
+- **Queue isolation in tests:** `QUEUE_PREFIX` is forced to `bull-test` and `S3_BUCKET` to `streamtube-videos-test` for every Jest run, so the suites never touch the dev worker's queue or the app bucket. A suite that enqueues must clean it (`queue.obliterate({ force: true })`) and close the module in `afterAll` so Redis handles do not keep Jest alive.
+- **`bitnamilegacy/minio` is frozen — dev/test only.** Official MinIO images refuse anonymous pulls, so the compose file pins `bitnamilegacy/minio:2025.7.23-debian-12-r5` by tag and digest. It receives no security fixes: CVE-2025-62506 is unpatched, and the code path it affects (STS) is not used here. Never reuse this image outside local development and CI; production uses AWS S3 or a maintained MinIO build.
+- **MinIO × production S3:**
+  - *CORS:* MinIO answers CORS for every bucket by default and has no `PutBucketCors`. On S3 the bucket needs a CORS rule that allows `PUT`/`GET`/`HEAD` from the frontend origin and **exposes the `ETag` header** — the browser reads each part's `ETag` to send it back in `complete`.
+  - *Incomplete multipart uploads:* MinIO has no `AbortIncompleteMultipartUpload` lifecycle action (it reclaims stale uploads on its own schedule; `mc rm --incomplete --recursive --force ALIAS/PATH` removes them by hand). On S3 add a lifecycle rule for it. The API detects an expired upload lazily (`NoSuchUpload` → `UPLOAD_EXPIRED`) and does not clean multipart itself.
+- **Worker and FFmpeg:** the worker reads the original through a presigned URL on the *internal* endpoint (ranged reads, no copy to disk) and never exposes that URL. `start:worker:dev` and a `nest start --watch` of the API share `dist/`; do not run both watchers at once on the same bind mount. `npm run build` also empties `dist/` first (`deleteOutDir: true`), which breaks any watcher or `node dist/...` process that is running: stop the `video-worker` before building (`docker compose stop video-worker`), then bring it back (`docker compose start video-worker`) and check `docker compose logs video-worker` for `Video worker started`.
+- **Manual smoke without HTTP:** the compiled app can be driven from a script (`NestFactory.createApplicationContext(AppModule)` over `dist/`), which exercises the real queue and the dev worker without starting the API server.
 
 ## Environment File Conventions
 

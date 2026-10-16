@@ -12,6 +12,25 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["npm", "run", "start:worker:dev"]
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -33,4 +52,33 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  redis:
+    image: redis:8.2.2
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_DEFAULT_BUCKETS=streamtube-videos,streamtube-videos-test
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://minio:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  minio-data:

@@ -128,4 +128,108 @@ describe('exportSpec (integration)', () => {
       }
     }
   });
+
+  describe('videos', () => {
+    type Operation = Record<string, unknown>;
+    const ERROR_REF = '#/components/schemas/ApiErrorEnvelope';
+
+    const VIDEO_OPERATIONS = [
+      { path: '/videos', method: 'post' },
+      { path: '/videos/{videoId}', method: 'get' },
+      { path: '/videos/{videoId}', method: 'delete' },
+      { path: '/videos/{videoId}/upload/part-urls', method: 'post' },
+      { path: '/videos/{videoId}/upload/parts', method: 'get' },
+      { path: '/videos/{videoId}/upload/complete', method: 'post' },
+      { path: '/videos/{videoId}/upload/restart', method: 'post' },
+      { path: '/videos/{videoId}/stream', method: 'get' },
+      { path: '/videos/{videoId}/download', method: 'get' },
+    ];
+
+    const operationOf = (path: string, method: string): Operation => {
+      const paths = document.paths as Record<string, Record<string, Operation>>;
+      return paths[path]?.[method];
+    };
+
+    it('documents the 9 video endpoints of the phase', () => {
+      for (const { path, method } of VIDEO_OPERATIONS) {
+        expect(operationOf(path, method)).toBeDefined();
+      }
+      const paths = document.paths as Record<string, Record<string, unknown>>;
+      const documented = Object.entries(paths)
+        .filter(([path]) => path.startsWith('/videos'))
+        .flatMap(([, methods]) => Object.keys(methods));
+      expect(documented).toHaveLength(VIDEO_OPERATIONS.length);
+    });
+
+    it.each(VIDEO_OPERATIONS)(
+      '$method $path requires the access-token bearer and has a summary',
+      ({ path, method }) => {
+        const operation = operationOf(path, method);
+        const security = operation.security as Array<Record<string, unknown>>;
+        expect(security.some((req) => 'access-token' in req)).toBe(true);
+        expect(typeof operation.summary).toBe('string');
+        expect((operation.summary as string).length).toBeGreaterThan(0);
+      },
+    );
+
+    it.each(VIDEO_OPERATIONS)(
+      '$method $path documents its error responses with ApiErrorEnvelope',
+      ({ path, method }) => {
+        const responses = operationOf(path, method).responses as Record<
+          string,
+          { content?: Record<string, { schema?: { $ref?: string } }> }
+        >;
+        const errorCodes = Object.keys(responses).filter(
+          (code) => Number(code) >= 400,
+        );
+        expect(errorCodes).toContain('401');
+        for (const code of errorCodes) {
+          expect(responses[code].content?.['application/json']?.schema).toEqual(
+            { $ref: ERROR_REF },
+          );
+        }
+      },
+    );
+
+    it('describes the request bodies of the upload endpoints with their properties', () => {
+      const schemas = (
+        document.components as {
+          schemas: Record<string, { properties?: Record<string, unknown> }>;
+        }
+      ).schemas;
+      const expected: Record<string, string[]> = {
+        InitiateVideoUploadDto: [
+          'filename',
+          'mime_type',
+          'size_bytes',
+          'title',
+        ],
+        SignUploadPartsDto: ['part_numbers'],
+        CompleteVideoUploadDto: ['parts'],
+        CompleteUploadPartDto: ['part_number', 'etag'],
+        RestartVideoUploadDto: ['size_bytes'],
+        VideoResponseDto: ['id', 'status', 'thumbnail_url', 'duration_seconds'],
+        PresignedUrlResponseDto: ['url', 'expires_at'],
+      };
+      for (const [name, properties] of Object.entries(expected)) {
+        expect(Object.keys(schemas[name]?.properties ?? {})).toEqual(
+          expect.arrayContaining(properties),
+        );
+      }
+    });
+
+    it('does not expose internal video fields in any schema', () => {
+      const schemas = (
+        document.components as {
+          schemas: Record<string, { properties?: Record<string, unknown> }>;
+        }
+      ).schemas;
+      for (const name of ['VideoResponseDto', 'VideoUploadResponseDto']) {
+        const properties = Object.keys(schemas[name].properties ?? {});
+        expect(properties).not.toEqual(expect.arrayContaining(['storage_key']));
+        expect(properties).not.toContain('upload_id');
+        expect(properties).not.toContain('channel_id');
+      }
+    });
+  });
 });
